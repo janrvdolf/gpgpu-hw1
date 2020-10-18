@@ -60,7 +60,7 @@ void *stage_1(void *attr) {
         BUFFER_ITEM * generated_item = (BUFFER_ITEM *) malloc(sizeof(BUFFER_ITEM));
         generated_item->id = generated_matrices;
 
-        printf("Generated %p with value %d\n", generated_item, generated_item->id);
+        printf("S1: generated %p with data %d\n", generated_item, generated_item->id);
 
         transfer_1_to_2_stage = generated_item;
         // end generate matrix
@@ -96,7 +96,7 @@ void *stage_2_master(void *attr) {
                 if (buffer[i] == NULL) {
                     buffer[i] = tmp;
 
-                    printf("Stage 2 master puts %p at buffer(%d)\n", tmp, i);
+                    printf("S2M: puts %p at buffer(%d)\n", tmp, i);
 
                     break;
                 }
@@ -122,7 +122,7 @@ void *stage_2_master(void *attr) {
 
             tmp = transfer_1_to_2_stage;
 
-            printf("Got %p\n", tmp);
+            printf("S2M: received %p with data %d\n", tmp, tmp->id);
 
             is_putting_into_buffer = 1;
 
@@ -166,6 +166,7 @@ void *stage_2_worker(void *attr) {
                 if (buffer[i] != NULL) {
                     tmp = buffer[i];
                     buffer[i] = NULL;
+                    printf("S2W: pick %p with data %d from buffer(%d)\n", tmp, tmp->id, i);
                     break;
                 }
             }
@@ -190,6 +191,9 @@ void *stage_2_worker(void *attr) {
             }
 
             transfer_2_to_3_stage = solution;
+
+            printf("S2W: put %p with data %d further\n", transfer_2_to_3_stage, transfer_2_to_3_stage->id);
+
 
             pthread_cond_signal(&empty23);
 
@@ -229,6 +233,8 @@ void *stage_3 (void *attr) {
 
             BUFFER_ITEM * tmp = transfer_2_to_3_stage;
 
+            printf("S3: get %p with data %d from S2W\n", tmp, tmp->id);
+
             transfer_2_to_3_stage = NULL;
 
             to_send = solve3(tmp);
@@ -247,6 +253,8 @@ void *stage_3 (void *attr) {
             }
 
             transfer_3_to_4_stage = to_send;
+
+            printf("S3: put %p with data %d to S4\n", to_send, to_send->id);
 
             pthread_cond_signal(&empty34);
 
@@ -274,7 +282,7 @@ void *stage_4(void *attr) {
         BUFFER_ITEM * tmp = transfer_3_to_4_stage;
 
         // TODO write to a file
-        printf("S4: Writing to a file %p with %d \n", tmp, tmp->id);
+        printf("S4: Writing %p to a file with data %d \n", tmp, tmp->id);
 
         free(tmp);
 
