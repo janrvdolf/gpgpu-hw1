@@ -18,7 +18,7 @@ struct buffer_item_t {
 /* buffer definition */
 //typedef int buffer_item;
 
-BUFFER_ITEM buffer[STAGE2_BUFFER_SIZE];
+BUFFER_ITEM * buffer[STAGE2_BUFFER_SIZE];
 
 pthread_attr_t  attr;
 
@@ -26,10 +26,13 @@ pthread_attr_t  attr;
 pthread_mutex_t mutex12;
 pthread_cond_t full12, empty12;
 
-BUFFER_ITEM * transfer_1_to_2_phaze = NULL;
-
+BUFFER_ITEM * transfer_1_to_2_stage = NULL;
 
 /* stage 2 sync structures */
+pthread_mutex_t mutex2;
+pthread_cond_t full2, empty2;
+
+int buffer_cnt = 0;
 
 /* stage 3 structures */
 
@@ -41,7 +44,7 @@ void *stage_1(void *attr) {
     while (generated_matrices < MATRIX_COUNT) {
         pthread_mutex_lock(&mutex12); // musi tu byt?
 
-        while (transfer_1_to_2_phaze != NULL) {
+        while (transfer_1_to_2_stage != NULL) {
             pthread_cond_wait(&empty12, &mutex12);
         }
         // generate matrix
@@ -50,7 +53,7 @@ void *stage_1(void *attr) {
 
         printf("Generated %p\n", generated_item);
 
-        transfer_1_to_2_phaze = generated_item;
+        transfer_1_to_2_stage = generated_item;
         // end generate matrix
 
         generated_matrices++;
@@ -73,18 +76,43 @@ void *stage_2_master(void *attr) {
     while (transfered_matrices < MATRIX_COUNT) {
         if (is_putting_into_buffer) {
             //producer part
+            pthread_mutex_lock(&mutex2);
 
+            while (buffer_cnt == STAGE2_BUFFER_SIZE) {
+                pthread_cond_wait(&full2, &mutex2);
+            }
 
+            // add
+            for (int i = 0; i < STAGE2_BUFFER_SIZE; i++) {
+                if (buffer[i] == NULL) {
+                    buffer[i] = tmp;
+
+                    printf("Stage 2 master puts %p at buffer(%d)\n",tmp, i);
+
+                    break;
+                }
+            }
+            buffer_cnt++;
+
+            pthread_cond_signal(&empty2);
+
+            pthread_mutex_unlock(&mutex2);
+
+            tmp = NULL;
+
+            transfered_matrices++;
+
+            is_putting_into_buffer = 0;
         } else {
             // consumer part
             pthread_mutex_lock(&mutex12);
 
-            while (transfer_1_to_2_phaze == NULL) {
+            while (transfer_1_to_2_stage == NULL) {
                 pthread_cond_wait(&full12, &mutex12);
             }
 
-            tmp = transfer_1_to_2_phaze;
-            transfer_1_to_2_phaze = NULL;
+            tmp = transfer_1_to_2_stage;
+            transfer_1_to_2_stage = NULL;
 
             printf("Got %p\n", tmp);
 
@@ -128,7 +156,7 @@ int main() {
     pthread_cond_init(&full12, NULL);
     pthread_cond_init(&empty12, NULL);
 
-    pthread_mutex_init(&mutex, NULL);
+    pthread_mutex_init(&mutex12, NULL);
 
     // create threads
     int is_thr_stage_1 = pthread_create(&thr_stage_1, &attr, (void * (*) (void *)) stage_1, NULL);
