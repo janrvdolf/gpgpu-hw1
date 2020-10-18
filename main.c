@@ -23,7 +23,7 @@ BUFFER_ITEM buffer[STAGE2_BUFFER_SIZE];
 pthread_attr_t  attr;
 
 /* stage 1 sync structures */
-pthread_mutex_t mutex;
+pthread_mutex_t mutex12;
 pthread_cond_t full12, empty12;
 
 BUFFER_ITEM * transfer_1_to_2_phaze = NULL;
@@ -39,10 +39,10 @@ void *stage_1(void *attr) {
     int generated_matrices = 0;
 
     while (generated_matrices < MATRIX_COUNT) {
-        pthread_mutex_lock(&mutex); // musi tu byt?
+        pthread_mutex_lock(&mutex12); // musi tu byt?
 
         while (transfer_1_to_2_phaze != NULL) {
-            pthread_cond_wait(&empty12, &mutex);
+            pthread_cond_wait(&empty12, &mutex12);
         }
         // generate matrix
         BUFFER_ITEM * generated_item = (BUFFER_ITEM *) malloc(sizeof(BUFFER_ITEM));
@@ -57,7 +57,7 @@ void *stage_1(void *attr) {
 
         pthread_cond_signal(&full12);
 
-        pthread_mutex_unlock(&mutex);
+        pthread_mutex_unlock(&mutex12);
     }
 
     pthread_exit(NULL);
@@ -77,10 +77,10 @@ void *stage_2_master(void *attr) {
 
         } else {
             // consumer part
-            pthread_mutex_lock(&mutex);
+            pthread_mutex_lock(&mutex12);
 
             while (transfer_1_to_2_phaze == NULL) {
-                pthread_cond_wait(&full12, &mutex);
+                pthread_cond_wait(&full12, &mutex12);
             }
 
             tmp = transfer_1_to_2_phaze;
@@ -92,7 +92,7 @@ void *stage_2_master(void *attr) {
 
             pthread_cond_signal(&empty12);
 
-            pthread_mutex_unlock(&mutex);
+            pthread_mutex_unlock(&mutex12);
         }
     }
 
