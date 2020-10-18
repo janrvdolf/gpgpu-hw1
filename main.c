@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <unistd.h>
 
 // stage 1 settings
 #define MATRIX_COUNT 10
@@ -75,6 +76,7 @@ void *stage_1(void *attr) {
         pthread_mutex_unlock(&mutex12);
     }
 
+    sleep(10);
     pthread_mutex_lock(&is_end_mutex);
     is_end = 1;
     pthread_mutex_unlock(&is_end_mutex);
@@ -159,9 +161,9 @@ void *stage_2_worker(void *attr) {
     int tmp_cnt = 0; // TODO delete
     int gets_from_buffer = 1;
 
-    int id = (int) attr;
+    long int id = (long int) attr;
 
-    printf("Starting thread S2W(%d)\n", id);
+    printf("Starting thread S2W(%ld)\n", id);
 
     BUFFER_ITEM * solution = NULL;
 
@@ -181,7 +183,7 @@ void *stage_2_worker(void *attr) {
                 if (buffer[i] != NULL) {
                     tmp = buffer[i];
                     buffer[i] = NULL;
-                    printf("S2W(%d): pick %p with data %d from buffer(%d)\n", id, tmp, tmp->id, i);
+                    printf("S2W(%ld): pick %p with data %d from buffer(%d)\n", id, tmp, tmp->id, i);
                     break;
                 }
             }
@@ -207,7 +209,7 @@ void *stage_2_worker(void *attr) {
 
             transfer_2_to_3_stage = solution;
 
-            printf("S2W(%d): put %p with data %d further\n", id, transfer_2_to_3_stage, transfer_2_to_3_stage->id);
+            printf("S2W(%ld): put %p with data %d further\n", id, transfer_2_to_3_stage, transfer_2_to_3_stage->id);
 
 
             pthread_cond_signal(&empty23);
@@ -222,7 +224,7 @@ void *stage_2_worker(void *attr) {
         }
     }
 
-    printf("S2W(%d): exitting\n", id);
+    printf("S2W(%ld): exitting\n", id);
 
     pthread_exit(NULL);
 }
@@ -351,22 +353,17 @@ int main() {
     pthread_mutex_init(&is_end_mutex, NULL);
 
     // create threads
-    int is_thr_stage_1 = pthread_create(&thr_stage_1, &attr, (void * (*) (void *)) stage_1, NULL);
-    if (is_thr_stage_1) {
-        printf("Error: stage 1 thread isn't created\n");
-    }
-
     int is_thr_stage_2_master = pthread_create(&thr_stage_2_master, &attr, (void * (*) (void *)) stage_2_master, NULL);
     if (is_thr_stage_2_master) {
         printf("Error: stage 2 master thread isn't created\n");
     }
 
     for (long int i = 0; i < STAGE2_WORKERS_COUNT; i++) {
-        int is_thr_stage_2_worker = pthread_create(&thr_stage_2_workers[i], &attr, (void * (*) (void *)) stage_2_worker, i);
+        int is_thr_stage_2_worker = pthread_create(&thr_stage_2_workers[i], &attr, (void * (*) (void *)) stage_2_worker, (void * )i);
         if (is_thr_stage_2_worker) {
-            printf("Error: stage 2 thread num %d isn't created\n", i);
+            printf("Error: stage 2 thread num %ld isn't created\n", i);
         } else {
-            printf("S2W created\n");
+            printf("S2W(%ld) created \n", i);
         }
     }
 
@@ -378,6 +375,11 @@ int main() {
     int is_thr_stage_4 = pthread_create(&thr_stage_4, &attr, (void * (*) (void *)) stage_4, NULL);
     if (is_thr_stage_4) {
         printf("Error: stage 4 thread isn't created\n");
+    }
+
+    int is_thr_stage_1 = pthread_create(&thr_stage_1, &attr, (void * (*) (void *)) stage_1, NULL);
+    if (is_thr_stage_1) {
+        printf("Error: stage 1 thread isn't created\n");
     }
 
     // exit - threads join, destroy/clean up
