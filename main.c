@@ -22,6 +22,9 @@ BUFFER_ITEM * buffer[STAGE2_BUFFER_SIZE] = {NULL};
 
 pthread_attr_t  attr;
 
+pthread_mutex_t is_end_mutex;
+int is_end = 0;
+
 /* stage 1 sync structures */
 pthread_mutex_t mutex12;
 pthread_cond_t full12, empty12;
@@ -72,6 +75,12 @@ void *stage_1(void *attr) {
         pthread_mutex_unlock(&mutex12);
     }
 
+    pthread_mutex_lock(&is_end_mutex);
+    is_end = 1;
+    pthread_mutex_unlock(&is_end_mutex);
+
+    printf("S1: exitting\n");
+
     pthread_exit(NULL);
 }
 
@@ -82,7 +91,7 @@ void *stage_2_master(void *attr) {
 
     BUFFER_ITEM * tmp = NULL;
 
-    while (transfered_matrices < MATRIX_COUNT) {
+    while (is_end == 0) {
         if (is_putting_into_buffer) {
             //producer part
             pthread_mutex_lock(&mutex2);
@@ -134,6 +143,8 @@ void *stage_2_master(void *attr) {
         }
     }
 
+    printf("S2M: exitting\n");
+
     pthread_exit(NULL);
 }
 
@@ -150,7 +161,7 @@ void *stage_2_worker(void *attr) {
 
     BUFFER_ITEM * solution = NULL;
 
-    while (tmp_cnt < 5) {
+    while (is_end == 0) {
         if (gets_from_buffer) {
             // consumer
             pthread_mutex_lock(&mutex2);
@@ -207,6 +218,8 @@ void *stage_2_worker(void *attr) {
         }
     }
 
+    printf("S2W: exitting\n");
+
     pthread_exit(NULL);
 }
 
@@ -222,7 +235,7 @@ void *stage_3 (void *attr) {
 
     BUFFER_ITEM * to_send = NULL; // TODO change data structure
 
-    while (tmp_cnt < MATRIX_COUNT) {
+    while (is_end == 0) {
         if (receive_data) {
             //consumer
             pthread_mutex_lock(&mutex23);
@@ -267,12 +280,14 @@ void *stage_3 (void *attr) {
         }
     }
 
+    printf("S3: exitting\n");
+
     pthread_exit(NULL);
 }
 
 void *stage_4(void *attr) {
     int tmp_cnt = 0;
-    while (tmp_cnt < MATRIX_COUNT) {
+    while (is_end == 0) {
         pthread_mutex_lock(&mutex34);
 
         while (transfer_3_to_4_stage == NULL) {
@@ -296,6 +311,8 @@ void *stage_4(void *attr) {
 
         tmp_cnt++;
     }
+
+    printf("S4: exitting\n");
 
     pthread_exit(NULL);
 }
@@ -327,6 +344,7 @@ int main() {
     pthread_mutex_init(&mutex2, NULL);
     pthread_mutex_init(&mutex23, NULL);
     pthread_mutex_init(&mutex34, NULL);
+    pthread_mutex_init(&is_end_mutex, NULL);
 
     // create threads
     int is_thr_stage_1 = pthread_create(&thr_stage_1, &attr, (void * (*) (void *)) stage_1, NULL);
@@ -343,6 +361,8 @@ int main() {
         int is_thr_stage_2_worker = pthread_create(&thr_stage_2_workers[i], &attr, (void * (*) (void *)) stage_2_worker, NULL);
         if (is_thr_stage_2_worker) {
             printf("Error: stage 2 thread num %d isn't created\n", i);
+        } else {
+            printf("S2W created\n");
         }
     }
 
@@ -366,6 +386,8 @@ int main() {
     pthread_join(thr_stage_4, NULL);
 
     pthread_attr_destroy(&attr);
+
+    printf("Main is exitting\n");
 
     return 0;
 }
