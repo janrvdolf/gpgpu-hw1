@@ -18,7 +18,7 @@ struct buffer_item_t {
 /* buffer definition */
 //typedef int buffer_item;
 
-BUFFER_ITEM * buffer[STAGE2_BUFFER_SIZE];
+BUFFER_ITEM * buffer[STAGE2_BUFFER_SIZE] = {NULL};
 
 pthread_attr_t  attr;
 
@@ -35,8 +35,17 @@ pthread_cond_t full2, empty2;
 int buffer_cnt = 0;
 
 /* stage 3 structures */
+pthread_mutex_t mutex23;
+pthread_cond_t full23, empty23;
+
+BUFFER_ITEM * transfer_2_to_3_stage = NULL;
 
 /* stage 4 structures */
+pthread_mutex_t mutex34;
+pthread_cond_t full34, empty34;
+
+BUFFER_ITEM * transfer_3_to_4_stage = NULL;
+
 
 void *stage_1(void *attr) {
     int generated_matrices = 0;
@@ -51,7 +60,7 @@ void *stage_1(void *attr) {
         BUFFER_ITEM * generated_item = (BUFFER_ITEM *) malloc(sizeof(BUFFER_ITEM));
         generated_item->id = generated_matrices;
 
-        printf("Generated %p\n", generated_item);
+        printf("Generated %p with value %d\n", generated_item, generated_item->id);
 
         transfer_1_to_2_stage = generated_item;
         // end generate matrix
@@ -87,7 +96,7 @@ void *stage_2_master(void *attr) {
                 if (buffer[i] == NULL) {
                     buffer[i] = tmp;
 
-                    printf("Stage 2 master puts %p at buffer(%d)\n",tmp, i);
+                    printf("Stage 2 master puts %p at buffer(%d)\n", tmp, i);
 
                     break;
                 }
@@ -112,11 +121,12 @@ void *stage_2_master(void *attr) {
             }
 
             tmp = transfer_1_to_2_stage;
-            transfer_1_to_2_stage = NULL;
 
             printf("Got %p\n", tmp);
 
             is_putting_into_buffer = 1;
+
+            transfer_1_to_2_stage = NULL;
 
             pthread_cond_signal(&empty12);
 
@@ -127,17 +137,157 @@ void *stage_2_master(void *attr) {
     pthread_exit(NULL);
 }
 
+BUFFER_ITEM * solve2(BUFFER_ITEM * item) {
+    // TODO implement
+    printf("Solving %p with value %d\n", item, item->id);
+
+    return item; // TODO change the return type
+}
+
 void *stage_2_worker(void *attr) {
+    int tmp_cnt = 0; // TODO delete
+    int gets_from_buffer = 1;
+
+    BUFFER_ITEM * solution = NULL;
+
+    while (tmp_cnt < 5) {
+        if (gets_from_buffer) {
+            // consumer
+            pthread_mutex_lock(&mutex2);
+
+            while (buffer_cnt == 0) {
+                pthread_cond_wait(&empty2, &mutex2);
+            }
+
+            BUFFER_ITEM * tmp = NULL;
+
+            // get
+            for (int i = 0; i < STAGE2_BUFFER_SIZE; i++) {
+                if (buffer[i] != NULL) {
+                    tmp = buffer[i];
+                    buffer[i] = NULL;
+                    break;
+                }
+            }
+
+            buffer_cnt--;
+
+            pthread_cond_signal(&full2);
+
+            pthread_mutex_unlock(&mutex2);
+
+            // solve and switch
+            solution = solve2(tmp);
+
+            gets_from_buffer = 0; // switch to producer
+
+        } else {
+            // producer
+            pthread_mutex_lock(&mutex23);
+
+            while (transfer_2_to_3_stage != NULL) {
+                pthread_cond_wait(&full23, &mutex23);
+            }
+
+            transfer_2_to_3_stage = solution;
+
+            pthread_cond_signal(&empty23);
+
+            pthread_mutex_unlock(&mutex23);
+
+            // reset to consumer
+            solution = NULL;
+            gets_from_buffer = 1;
+
+            tmp_cnt++; // TODO delete
+        }
+    }
 
     pthread_exit(NULL);
 }
 
+BUFFER_ITEM * solve3(BUFFER_ITEM * item) {
+    // TODO implement
+    return item; // TODO change the return type
+}
+
 void *stage_3 (void *attr) {
+    int tmp_cnt = 0; // TODO delete
+
+    int receive_data = 1;
+
+    BUFFER_ITEM * to_send = NULL; // TODO change data structure
+
+    while (tmp_cnt < MATRIX_COUNT) {
+        if (receive_data) {
+            //consumer
+            pthread_mutex_lock(&mutex23);
+
+            while(transfer_2_to_3_stage == NULL) {
+                pthread_cond_wait(&empty23, &mutex23);
+            }
+
+            BUFFER_ITEM * tmp = transfer_2_to_3_stage;
+
+            transfer_2_to_3_stage = NULL;
+
+            to_send = solve3(tmp);
+
+            pthread_cond_signal(&full23);
+
+            pthread_mutex_unlock(&mutex23);
+
+            receive_data = 0;
+        } else {
+            // producer
+            pthread_mutex_lock(&mutex34);
+
+            while(transfer_3_to_4_stage != NULL) {
+                pthread_cond_wait(&full34, &mutex34);
+            }
+
+            transfer_3_to_4_stage = to_send;
+
+            pthread_cond_signal(&empty34);
+
+            pthread_mutex_unlock(&mutex34);
+
+            receive_data = 1;
+            to_send = NULL;
+
+            tmp_cnt++; // TODO delete
+        }
+    }
 
     pthread_exit(NULL);
 }
 
 void *stage_4(void *attr) {
+    int tmp_cnt = 0;
+    while (tmp_cnt < MATRIX_COUNT) {
+        pthread_mutex_lock(&mutex34);
+
+        while (transfer_3_to_4_stage == NULL) {
+            pthread_cond_wait(&empty34, &mutex34);
+        }
+
+        BUFFER_ITEM * tmp = transfer_3_to_4_stage;
+
+        // TODO write to a file
+        printf("S4: Writing to a file %p with %d \n", tmp, tmp->id);
+
+        free(tmp);
+
+        tmp = NULL;
+
+        transfer_3_to_4_stage = NULL;
+
+        pthread_cond_signal(&full34);
+
+        pthread_mutex_unlock(&mutex34);
+
+        tmp_cnt++;
+    }
 
     pthread_exit(NULL);
 }
@@ -156,7 +306,19 @@ int main() {
     pthread_cond_init(&full12, NULL);
     pthread_cond_init(&empty12, NULL);
 
+    pthread_cond_init(&full2, NULL);
+    pthread_cond_init(&empty2, NULL);
+
+    pthread_cond_init(&full23, NULL);
+    pthread_cond_init(&empty23, NULL);
+
+    pthread_cond_init(&full34, NULL);
+    pthread_cond_init(&empty34, NULL);
+
     pthread_mutex_init(&mutex12, NULL);
+    pthread_mutex_init(&mutex2, NULL);
+    pthread_mutex_init(&mutex23, NULL);
+    pthread_mutex_init(&mutex34, NULL);
 
     // create threads
     int is_thr_stage_1 = pthread_create(&thr_stage_1, &attr, (void * (*) (void *)) stage_1, NULL);
@@ -170,7 +332,7 @@ int main() {
     }
 
     for (int i = 0; i < STAGE2_WORKERS_COUNT; i++) {
-        int is_thr_stage_2_worker = pthread_create(&thr_stage_2_master, &attr, (void * (*) (void *)) stage_2_master, NULL);
+        int is_thr_stage_2_worker = pthread_create(&thr_stage_2_workers[i], &attr, (void * (*) (void *)) stage_2_worker, NULL);
         if (is_thr_stage_2_worker) {
             printf("Error: stage 2 thread num %d isn't created\n", i);
         }
