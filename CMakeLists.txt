@@ -7,3 +7,7 @@ set(CMAKE_BUILD_TYPE Debug)
 
 add_executable(main main.c)
 target_link_libraries(main pthread)
+
+add_executable(main2 main2.c)
+
+add_executable(main3 main3.c)

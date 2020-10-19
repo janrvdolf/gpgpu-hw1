@@ -14,6 +14,7 @@
 
 struct buffer_item_t {
     int id;
+    double matrix[MATRIX_DIM * MATRIX_DIM + MATRIX_DIM];
 } typedef BUFFER_ITEM;
 
 /* buffer definition */
