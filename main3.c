@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define MATRIX_DIM 3
 
@@ -71,28 +72,40 @@ int main () {
     printf("Matrix:\n");
     print_matrix(matrix);
 
-
-    for (int i = MATRIX_DIM - 1; i >= 0; i--) {
-        double sum = 0;
-        for (int k = i + 1; k < MATRIX_DIM; k++) {
-            int idx = i * (MATRIX_DIM+1) + k;
-
-            sum += solution[k] * matrix[idx];
-        }
-
-        int idx = (i+1) * (MATRIX_DIM+1) -1 ;
-
-        solution[i] = (matrix[idx] - sum) / matrix[i * (MATRIX_DIM+1) + i];
-    }
+    int is_one_solution = 1;
 
     for (int i = 0; i < MATRIX_DIM; i++) {
-        printf("x_%d = %lf\n", i, solution[i]);
+        int idx = i * (MATRIX_DIM + 1) + i;
+
+        if (fabs(matrix[idx]) < 0.0001) {
+            is_one_solution = 0;
+        }
+    }
+
+    if (is_one_solution) {
+        for (int i = MATRIX_DIM - 1; i >= 0; i--) {
+            double sum = 0;
+            for (int k = i + 1; k < MATRIX_DIM; k++) {
+                int idx = i * (MATRIX_DIM+1) + k;
+
+                sum += solution[k] * matrix[idx];
+            }
+
+            int idx = (i+1) * (MATRIX_DIM+1) -1 ;
+
+            solution[i] = (matrix[idx] - sum) / matrix[i * (MATRIX_DIM+1) + i];
+        }
+
+        for (int i = 0; i < MATRIX_DIM; i++) {
+            printf("x_%d = %lf\n", i, solution[i]);
+        }
+    } else {
+        printf("Multiple solutions of no solutions.");
     }
 
     free(matrix);
+
     free(solution);
-
-
 
     return 0;
 }
