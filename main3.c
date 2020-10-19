@@ -50,6 +50,12 @@ int main () {
 
     double *matrix = (double *) malloc(sizeof(double) * m_size); // matrix A with  b
 
+    double *solution = (double *) malloc(sizeof(double) * MATRIX_DIM);
+
+    for (int i = 0; i < MATRIX_DIM; i++) {
+        solution[i] = 1;
+    }
+
     for (int i = 0; i < m_size; i++) {
         double r = m_fill[i]; // random_double(10);
         matrix[i] = r;
@@ -64,6 +70,29 @@ int main () {
 
     printf("Matrix:\n");
     print_matrix(matrix);
+
+
+    for (int i = MATRIX_DIM - 1; i >= 0; i--) {
+        double sum = 0;
+        for (int k = i + 1; k < MATRIX_DIM; k++) {
+            int idx = i * (MATRIX_DIM+1) + k;
+
+            sum += solution[k] * matrix[idx];
+        }
+
+        int idx = (i+1) * (MATRIX_DIM+1) -1 ;
+
+        solution[i] = (matrix[idx] - sum) / matrix[i * (MATRIX_DIM+1) + i];
+    }
+
+    for (int i = 0; i < MATRIX_DIM; i++) {
+        printf("x_%d = %lf\n", i, solution[i]);
+    }
+
+    free(matrix);
+    free(solution);
+
+
 
     return 0;
 }
