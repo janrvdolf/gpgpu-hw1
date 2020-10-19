@@ -3,10 +3,13 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <signal.h>
 
 // stage 1 settings
 #define MATRIX_COUNT 10
 #define MATRIX_DIM 2
+
+#define RAND_DIVISOR 100000000
 
 // stage 2 settings
 #define STAGE2_BUFFER_SIZE 3
@@ -30,6 +33,9 @@ pthread_attr_t  attr;
 
 pthread_mutex_t is_end_mutex;
 int is_end = 0;
+
+int is_stage3_end = 0;
+
 
 /* stage 1 sync structures */
 pthread_mutex_t mutex12;
@@ -61,36 +67,37 @@ void *stage_1(void *attr) {
 
     int generated_matrices = 0;
 
-    while (generated_matrices < MATRIX_COUNT) {
+    while (1) {
         pthread_mutex_lock(&mutex12); // musi tu byt?
 
         while (transfer_1_to_2_stage != NULL) {
             pthread_cond_wait(&empty12, &mutex12);
         }
         // generate matrix
-        BUFFER_ITEM * generated_item = (BUFFER_ITEM *) malloc(sizeof(BUFFER_ITEM));
-        generated_item->id = generated_matrices;
+        if (generated_matrices >= MATRIX_COUNT) {
+            is_end = 1;
+            pthread_cond_signal(&full12);
+            pthread_mutex_unlock(&mutex12);
+            break;
+        } else {
+            BUFFER_ITEM * generated_item = (BUFFER_ITEM *) malloc(sizeof(BUFFER_ITEM));
+            generated_item->id = generated_matrices;
 
-        printf("S1: generated %p with data %d\n", generated_item, generated_item->id);
+            printf("S1: generated %p with data %d\n", generated_item, generated_item->id);
 
-        transfer_1_to_2_stage = generated_item;
-        // end generate matrix
+            transfer_1_to_2_stage = generated_item;
+            // end generate matrix
+        }
+        pthread_cond_signal(&full12);
 
         generated_matrices++;
 
-        pthread_cond_signal(&full12);
-
         pthread_mutex_unlock(&mutex12);
+
     }
 
-    sleep(3); // TODO delete
 
-    for (int i = 0; i < STAGE2_WORKERS_COUNT + 3; i++) {
-        printf("S1: Cancelling %d\n", i);
-        pthread_cancel(thread_array->entry[i]);
-
-//        pthread_kill(thread_array->entry[i]);
-    }
+    is_end = 1;
 
     printf("S1: exitting\n");
 
@@ -104,55 +111,52 @@ void *stage_2_master(void *attr) {
 
     BUFFER_ITEM * tmp = NULL;
 
-    while (is_end == 0) {
+    while (1) {
+        if (is_end && !is_putting_into_buffer) {
+            break;
+        }
+
         if (is_putting_into_buffer) {
             //producer part
             pthread_mutex_lock(&mutex2);
-
             while (buffer_cnt == STAGE2_BUFFER_SIZE) {
                 pthread_cond_wait(&full2, &mutex2);
             }
-
             // add
             for (int i = 0; i < STAGE2_BUFFER_SIZE; i++) {
                 if (buffer[i] == NULL) {
                     buffer[i] = tmp;
-
-                    printf("S2M: puts %p at buffer(%d)\n", tmp, i);
-
                     break;
                 }
             }
             buffer_cnt++;
-
-            pthread_cond_signal(&empty2);
-
             pthread_mutex_unlock(&mutex2);
+            pthread_cond_broadcast(&empty2);
 
+
+
+            printf("S2M: puts %p at buffer(i)\n", tmp);
             tmp = NULL;
-
             transfered_matrices++;
-
             is_putting_into_buffer = 0;
+
         } else {
             // consumer part
             pthread_mutex_lock(&mutex12);
-
             while (transfer_1_to_2_stage == NULL) {
+                if (is_end) {
+                    printf("S2M: exitting2\n");
+                    pthread_exit(NULL);
+                }
                 pthread_cond_wait(&full12, &mutex12);
             }
-
             tmp = transfer_1_to_2_stage;
-
-            printf("S2M: received %p with data %d\n", tmp, tmp->id);
+            transfer_1_to_2_stage = NULL;
+            pthread_cond_signal(&empty12);
+            pthread_mutex_unlock(&mutex12);
 
             is_putting_into_buffer = 1;
-
-            transfer_1_to_2_stage = NULL;
-
-            pthread_cond_signal(&empty12);
-
-            pthread_mutex_unlock(&mutex12);
+            printf("S2M: received %p with data %d\n", tmp, tmp->id);
         }
     }
 
@@ -168,6 +172,8 @@ BUFFER_ITEM * solve2(BUFFER_ITEM * item) {
     return item; // TODO change the return type
 }
 
+
+
 void *stage_2_worker(void *attr) {
 
     int gets_from_buffer = 1;
@@ -178,52 +184,62 @@ void *stage_2_worker(void *attr) {
 
     BUFFER_ITEM * solution = NULL;
 
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
-
-    while (is_end == 0) {
-        pthread_testcancel();
-        printf("S2W(%ld): tests cancel\n", id);
-        sleep(1);
+    while (1) {
+//        pthread_testcancel();
+//        printf("S2W(%ld): tests cancel\n", id);
+//        int rNum = rand() / RAND_DIVISOR;
+        //printf("S2W(%ld): sleeps for %d\n", rNum);
+        //sleep(rNum);
+//        if (is_end) {
+//            break;
+//        }
 
         if (gets_from_buffer) {
             // consumer
+            printf("S2W(%ld): in consumer mutex\n", id);
             pthread_mutex_lock(&mutex2);
-
             while (buffer_cnt == 0) {
+                printf("S2W(%ld): in consumer wait\n", id);
+                if (is_stage3_end) {
+                    printf("S2W(%ld): consumer exitting\n", id);
+                    pthread_exit(NULL);
+                }
+
                 pthread_cond_wait(&empty2, &mutex2);
             }
-
+            printf("S2W(%ld): out consumer wait\n", id);
             BUFFER_ITEM * tmp = NULL;
-
             // get
             for (int i = 0; i < STAGE2_BUFFER_SIZE; i++) {
                 if (buffer[i] != NULL) {
                     tmp = buffer[i];
                     buffer[i] = NULL;
-                    printf("S2W(%ld): pick %p with data %d from buffer(%d)\n", id, tmp, tmp->id, i);
                     break;
                 }
             }
-
             buffer_cnt--;
-
             pthread_cond_signal(&full2);
-
+            pthread_mutex_unlock(&mutex2);
             // solve and switch
             solution = solve2(tmp);
-
             gets_from_buffer = 0; // switch to producer
-
-            pthread_mutex_unlock(&mutex2);
-
+            printf("S2W(%ld): pick %p with data %d from buffer(i)\n", id, tmp, tmp->id);
+            printf("S2W(%ld): out consumer mutex\n", id);
         } else {
             // producer
+            printf("S2W(%ld): in producer mutex\n", id);
             pthread_mutex_lock(&mutex23);
 
             while (transfer_2_to_3_stage != NULL) {
+                printf("S2W(%ld): in producer wait\n", id);
+                if (is_stage3_end) {
+                    printf("S2W(%ld): producer exitting\n", id);
+                    pthread_exit(NULL);
+                }
+
                 pthread_cond_wait(&full23, &mutex23);
             }
+            printf("S2W(%ld): out producer wait\n", id);
 
             transfer_2_to_3_stage = solution;
 
@@ -237,7 +253,7 @@ void *stage_2_worker(void *attr) {
             gets_from_buffer = 1;
 
             pthread_mutex_unlock(&mutex23);
-
+            printf("S2W(%ld): out producer mutex\n", id);
         }
     }
 
@@ -252,25 +268,33 @@ BUFFER_ITEM * solve3(BUFFER_ITEM * item) {
 }
 
 void *stage_3 (void *attr) {
+    THREADS_ARRAY * thread_array = (THREADS_ARRAY *) attr;
+
     int receive_data = 1;
 
     BUFFER_ITEM * to_send = NULL; // TODO change data structure
 
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+    int transfered_matrices = 0;
 
-    while (is_end == 0) {
-        pthread_testcancel();
+    while (1) {
+
+//        if (is_end && receive_data) {
+//            break;
+//        }
 
         if (receive_data) {
             //consumer
+            printf("S3: in consumer lock\n");
             pthread_mutex_lock(&mutex23);
-
             while(transfer_2_to_3_stage == NULL) {
+                printf("S3: consumer wait\n");
                 pthread_cond_wait(&empty23, &mutex23);
             }
-
             BUFFER_ITEM * tmp = transfer_2_to_3_stage;
+            pthread_mutex_unlock(&mutex23);
+            pthread_cond_broadcast(&full23);
+
+            printf("S3: out consumer lock\n");
 
             printf("S3: get %p with data %d from S2W\n", tmp, tmp->id);
 
@@ -280,32 +304,31 @@ void *stage_3 (void *attr) {
 
             receive_data = 0;
 
-            pthread_cond_signal(&full23);
-
-
-
-            pthread_mutex_unlock(&mutex23);
-
-
         } else {
             // producer
+            printf("S3: in producer lock\n");
             pthread_mutex_lock(&mutex34);
-
             while(transfer_3_to_4_stage != NULL) {
+                printf("S3: producet wait\n");
                 pthread_cond_wait(&full34, &mutex34);
             }
-
             transfer_3_to_4_stage = to_send;
+            pthread_cond_signal(&empty34);
+            pthread_mutex_unlock(&mutex34);
+            printf("S3: out producer lock\n");
 
             printf("S3: put %p with data %d to S4\n", to_send, to_send->id);
-
-            pthread_cond_signal(&empty34);
+            transfered_matrices++;
+//            if (is_end && transfered_matrices == MATRIX_COUNT) {
+//                is_stage3_end = 1;
+//
+//                break;
+//            }
 
             receive_data = 1;
             to_send = NULL;
-
-            pthread_mutex_unlock(&mutex34);
         }
+
     }
 
     printf("S3: exitting\n");
@@ -314,19 +337,28 @@ void *stage_3 (void *attr) {
 }
 
 void *stage_4(void *attr) {
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+    THREADS_ARRAY * thread_array = (THREADS_ARRAY *) attr;
+    int thread_cnt = 0;
+    while (1) {
 
-    while (is_end == 0) {
-        pthread_testcancel();
 
         printf("S4: tests cancel\n");
         sleep(1);
 
+        if (is_end == 3) {
+            break;
+        }
+
         pthread_mutex_lock(&mutex34);
+
+
 
         while (transfer_3_to_4_stage == NULL) {
             printf("S4: cond_wait\n");
+            if (is_end == 3) {
+                printf("S4: exitting\n");
+                pthread_exit(NULL);
+            }
             pthread_cond_wait(&empty34, &mutex34);
         }
 
@@ -344,9 +376,23 @@ void *stage_4(void *attr) {
         pthread_cond_signal(&full34);
 
         pthread_mutex_unlock(&mutex34);
+
+        thread_cnt++;
+
+        if (is_end && thread_cnt == MATRIX_COUNT) {
+            break;
+        }
     }
 
     printf("S4: exitting\n");
+
+    for (int i = 1; i < STAGE2_WORKERS_COUNT + 1; i++) {
+
+        pthread_cancel(thread_array->entry[i]);
+//        pthread_kill(thread_array->entry[i], SIGKILL);
+
+        printf("S4: Cancelling %d \n", i);
+    }
 
     pthread_exit(NULL);
 }
@@ -405,7 +451,7 @@ int main() {
         }
     }
 
-    int is_thr_stage_3 = pthread_create(&thr_stage_3, &attr, (void * (*) (void *)) stage_3, NULL);
+    int is_thr_stage_3 = pthread_create(&thr_stage_3, &attr, (void * (*) (void *)) stage_3, &thr_array);
     if (is_thr_stage_3) {
         printf("Error: stage 3 thread isn't created\n");
     } else {
@@ -413,7 +459,7 @@ int main() {
         thr_array_cnt++;
     }
 
-    int is_thr_stage_4 = pthread_create(&thr_stage_4, &attr, (void * (*) (void *)) stage_4, NULL);
+    int is_thr_stage_4 = pthread_create(&thr_stage_4, &attr, (void * (*) (void *)) stage_4, &thr_array);
     if (is_thr_stage_4) {
         printf("Error: stage 4 thread isn't created\n");
     } else {
@@ -433,6 +479,15 @@ int main() {
     pthread_join(thr_stage_2_master, NULL);
     printf("Join 2\n");
 
+    for (int i = 0; i < STAGE2_WORKERS_COUNT; i++) {
+
+        pthread_join(thr_stage_2_workers[i], NULL);
+
+
+        printf("Join 2W %d\n", i);
+
+    }
+
 
     pthread_join(thr_stage_3, NULL);
     printf("Join 3\n");
@@ -440,11 +495,7 @@ int main() {
     pthread_join(thr_stage_4, NULL);
     printf("Join 4\n");
 
-    for (int i = 0; i < STAGE2_WORKERS_COUNT; i++) {
-        pthread_join(thr_stage_2_workers[i], NULL);
-        printf("Join 2W %d\n", i);
 
-    }
 
     pthread_attr_destroy(&attr);
 
