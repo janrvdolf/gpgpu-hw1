@@ -11,3 +11,6 @@ target_link_libraries(main pthread)
 add_executable(main2 main2.c)
 
 add_executable(main3 main3.c)
+
+add_executable(main4 main4.c)
+target_link_libraries(main4 pthread)

@@ -12,6 +12,10 @@
 #define STAGE2_BUFFER_SIZE 3
 #define STAGE2_WORKERS_COUNT 5
 
+struct threads_array_t {
+    pthread_t entry[STAGE2_WORKERS_COUNT + 3]; // all threads except the first one
+} typedef THREADS_ARRAY;
+
 struct buffer_item_t {
     int id;
     double matrix[MATRIX_DIM * MATRIX_DIM + MATRIX_DIM];
@@ -53,6 +57,8 @@ BUFFER_ITEM * transfer_3_to_4_stage = NULL;
 
 
 void *stage_1(void *attr) {
+    THREADS_ARRAY * thread_array = (THREADS_ARRAY *) attr;
+
     int generated_matrices = 0;
 
     while (generated_matrices < MATRIX_COUNT) {
@@ -77,10 +83,14 @@ void *stage_1(void *attr) {
         pthread_mutex_unlock(&mutex12);
     }
 
-    sleep(10);
-    pthread_mutex_lock(&is_end_mutex);
-    is_end = 1;
-    pthread_mutex_unlock(&is_end_mutex);
+    sleep(3); // TODO delete
+
+    for (int i = 0; i < STAGE2_WORKERS_COUNT + 3; i++) {
+        printf("S1: Cancelling %d\n", i);
+        pthread_cancel(thread_array->entry[i]);
+
+//        pthread_kill(thread_array->entry[i]);
+    }
 
     printf("S1: exitting\n");
 
@@ -159,7 +169,7 @@ BUFFER_ITEM * solve2(BUFFER_ITEM * item) {
 }
 
 void *stage_2_worker(void *attr) {
-    int tmp_cnt = 0; // TODO delete
+
     int gets_from_buffer = 1;
 
     long int id = (long int) attr;
@@ -168,7 +178,14 @@ void *stage_2_worker(void *attr) {
 
     BUFFER_ITEM * solution = NULL;
 
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
     while (is_end == 0) {
+        pthread_testcancel();
+        printf("S2W(%ld): tests cancel\n", id);
+        sleep(1);
+
         if (gets_from_buffer) {
             // consumer
             pthread_mutex_lock(&mutex2);
@@ -193,12 +210,12 @@ void *stage_2_worker(void *attr) {
 
             pthread_cond_signal(&full2);
 
-            pthread_mutex_unlock(&mutex2);
-
             // solve and switch
             solution = solve2(tmp);
 
             gets_from_buffer = 0; // switch to producer
+
+            pthread_mutex_unlock(&mutex2);
 
         } else {
             // producer
@@ -215,13 +232,12 @@ void *stage_2_worker(void *attr) {
 
             pthread_cond_signal(&empty23);
 
-            pthread_mutex_unlock(&mutex23);
-
             // reset to consumer
             solution = NULL;
             gets_from_buffer = 1;
 
-            tmp_cnt++; // TODO delete
+            pthread_mutex_unlock(&mutex23);
+
         }
     }
 
@@ -236,13 +252,16 @@ BUFFER_ITEM * solve3(BUFFER_ITEM * item) {
 }
 
 void *stage_3 (void *attr) {
-    int tmp_cnt = 0; // TODO delete
-
     int receive_data = 1;
 
     BUFFER_ITEM * to_send = NULL; // TODO change data structure
 
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
     while (is_end == 0) {
+        pthread_testcancel();
+
         if (receive_data) {
             //consumer
             pthread_mutex_lock(&mutex23);
@@ -259,11 +278,15 @@ void *stage_3 (void *attr) {
 
             to_send = solve3(tmp);
 
+            receive_data = 0;
+
             pthread_cond_signal(&full23);
+
+
 
             pthread_mutex_unlock(&mutex23);
 
-            receive_data = 0;
+
         } else {
             // producer
             pthread_mutex_lock(&mutex34);
@@ -278,12 +301,10 @@ void *stage_3 (void *attr) {
 
             pthread_cond_signal(&empty34);
 
-            pthread_mutex_unlock(&mutex34);
-
             receive_data = 1;
             to_send = NULL;
 
-            tmp_cnt++; // TODO delete
+            pthread_mutex_unlock(&mutex34);
         }
     }
 
@@ -293,11 +314,19 @@ void *stage_3 (void *attr) {
 }
 
 void *stage_4(void *attr) {
-    int tmp_cnt = 0;
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
     while (is_end == 0) {
+        pthread_testcancel();
+
+        printf("S4: tests cancel\n");
+        sleep(1);
+
         pthread_mutex_lock(&mutex34);
 
         while (transfer_3_to_4_stage == NULL) {
+            printf("S4: cond_wait\n");
             pthread_cond_wait(&empty34, &mutex34);
         }
 
@@ -315,8 +344,6 @@ void *stage_4(void *attr) {
         pthread_cond_signal(&full34);
 
         pthread_mutex_unlock(&mutex34);
-
-        tmp_cnt++;
     }
 
     printf("S4: exitting\n");
@@ -326,6 +353,9 @@ void *stage_4(void *attr) {
 
 int main() {
     // init
+    THREADS_ARRAY thr_array;
+    int thr_array_cnt = 0;
+
     pthread_t thr_stage_1;
     pthread_t thr_stage_2_master;
     pthread_t thr_stage_2_workers[STAGE2_WORKERS_COUNT];
@@ -353,44 +383,68 @@ int main() {
     pthread_mutex_init(&mutex34, NULL);
     pthread_mutex_init(&is_end_mutex, NULL);
 
+
+
     // create threads
     int is_thr_stage_2_master = pthread_create(&thr_stage_2_master, &attr, (void * (*) (void *)) stage_2_master, NULL);
     if (is_thr_stage_2_master) {
         printf("Error: stage 2 master thread isn't created\n");
+    } else {
+        thr_array.entry[thr_array_cnt] = thr_stage_2_master;
+        thr_array_cnt++;
     }
 
     for (long int i = 0; i < STAGE2_WORKERS_COUNT; i++) {
-        int is_thr_stage_2_worker = pthread_create(&thr_stage_2_workers[i], &attr, (void * (*) (void *)) stage_2_worker, (void * )i);
+        int is_thr_stage_2_worker = pthread_create(&thr_stage_2_workers[i], &attr, (void * (*) (void *)) stage_2_worker, (void*) i);
         if (is_thr_stage_2_worker) {
             printf("Error: stage 2 thread num %ld isn't created\n", i);
         } else {
             printf("S2W(%ld) created \n", i);
+            thr_array.entry[thr_array_cnt] = thr_stage_2_workers[i];
+            thr_array_cnt++;
         }
     }
 
     int is_thr_stage_3 = pthread_create(&thr_stage_3, &attr, (void * (*) (void *)) stage_3, NULL);
     if (is_thr_stage_3) {
         printf("Error: stage 3 thread isn't created\n");
+    } else {
+        thr_array.entry[thr_array_cnt] = thr_stage_3;
+        thr_array_cnt++;
     }
 
     int is_thr_stage_4 = pthread_create(&thr_stage_4, &attr, (void * (*) (void *)) stage_4, NULL);
     if (is_thr_stage_4) {
         printf("Error: stage 4 thread isn't created\n");
+    } else {
+        thr_array.entry[thr_array_cnt] = thr_stage_4;
     }
 
-    int is_thr_stage_1 = pthread_create(&thr_stage_1, &attr, (void * (*) (void *)) stage_1, NULL);
+    int is_thr_stage_1 = pthread_create(&thr_stage_1, &attr, (void * (*) (void *)) stage_1, &thr_array);
     if (is_thr_stage_1) {
         printf("Error: stage 1 thread isn't created\n");
     }
 
     // exit - threads join, destroy/clean up
+
     pthread_join(thr_stage_1, NULL);
+    printf("Join 1\n");
+
     pthread_join(thr_stage_2_master, NULL);
+    printf("Join 2\n");
+
+
+    pthread_join(thr_stage_3, NULL);
+    printf("Join 3\n");
+
+    pthread_join(thr_stage_4, NULL);
+    printf("Join 4\n");
+
     for (int i = 0; i < STAGE2_WORKERS_COUNT; i++) {
         pthread_join(thr_stage_2_workers[i], NULL);
+        printf("Join 2W %d\n", i);
+
     }
-    pthread_join(thr_stage_3, NULL);
-    pthread_join(thr_stage_4, NULL);
 
     pthread_attr_destroy(&attr);
 
