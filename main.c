@@ -339,6 +339,7 @@ void *stage_3 (void *attr) {
                 pthread_cond_wait(&empty23, &mutex23);
             }
             BUFFER_ITEM * tmp = transfer_2_to_3_stage;
+            transfer_2_to_3_stage = NULL;
             pthread_mutex_unlock(&mutex23);
             pthread_cond_broadcast(&full23);
 
@@ -346,7 +347,7 @@ void *stage_3 (void *attr) {
 
             printf("S3: get %p with data %d from S2W\n", tmp, tmp->id);
 
-            transfer_2_to_3_stage = NULL;
+
 
             to_send = solve3(tmp);
 
@@ -402,7 +403,7 @@ void *stage_4(void *attr) {
         BUFFER_ITEM * tmp = transfer_3_to_4_stage;
 
 
-        printf("S4: Writing %p to a file with data %d \n", tmp, tmp->id);
+        printf("S4: Writing (%d/%d) %p to a file with data %d \n", ++thread_cnt, MATRIX_COUNT, tmp, tmp->id);
 
         char filename_buffer[100];
 
@@ -429,9 +430,6 @@ void *stage_4(void *attr) {
         pthread_mutex_unlock(&mutex34);
         pthread_cond_signal(&full34);
 
-
-        thread_cnt++;
-
         if (is_end > 0 && thread_cnt == MATRIX_COUNT) {
             break;
         }
@@ -441,7 +439,7 @@ void *stage_4(void *attr) {
 
 
 
-    for (int i = 1; i < STAGE2_WORKERS_COUNT + 1; i++) {
+    for (int i = 1; i < STAGE2_WORKERS_COUNT + 3; i++) {
 
         pthread_cancel(thread_array->entry[i]);
 //        pthread_kill(thread_array->entry[i], SIGKILL);
