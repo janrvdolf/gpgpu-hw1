@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define MATRIX_DIM 3
+#define MATRIX_DIM 2
 
 double random_double(int upper) {
     return rand() % upper;
@@ -58,7 +58,8 @@ int main () {
     }
 
     for (int i = 0; i < m_size; i++) {
-        double r = m_fill[i]; // random_double(10);
+        double r = random_double(10);
+        //double r = m_fill[i];
         matrix[i] = r;
 
         printf("Generated at %d random number %lf\n", i, r);

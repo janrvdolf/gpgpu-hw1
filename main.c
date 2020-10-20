@@ -3,7 +3,8 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <signal.h>
+#include <string.h>
+#include <math.h>
 
 // stage 1 settings
 #define MATRIX_COUNT 10
@@ -22,6 +23,8 @@ struct threads_array_t {
 struct buffer_item_t {
     int id;
     double matrix[MATRIX_DIM * MATRIX_DIM + MATRIX_DIM];
+    double solution[MATRIX_DIM];
+    int solutions_count;
 } typedef BUFFER_ITEM;
 
 /* buffer definition */
@@ -82,6 +85,10 @@ void *stage_1(void *attr) {
         } else {
             BUFFER_ITEM * generated_item = (BUFFER_ITEM *) malloc(sizeof(BUFFER_ITEM));
             generated_item->id = generated_matrices;
+
+            for (int i = 0; i < MATRIX_DIM*MATRIX_DIM+MATRIX_DIM; i++) {
+                generated_item->matrix[i] = rand() % 10;
+            }
 
             printf("S1: generated %p with data %d\n", generated_item, generated_item->id);
 
@@ -166,10 +173,27 @@ void *stage_2_master(void *attr) {
 }
 
 BUFFER_ITEM * solve2(BUFFER_ITEM * item) {
-    // TODO implement
+    // Triangulation
+
     printf("Solving %p with value %d\n", item, item->id);
 
-    return item; // TODO change the return type
+    for (int j = 0; j < MATRIX_DIM; j++) {
+        for (int i = j + 1; i < MATRIX_DIM; i++) {
+            int idx_diagonal = j * (MATRIX_DIM + 1) + j;
+            int idx = i * (MATRIX_DIM + 1) + j;
+
+            double f = item->matrix[idx] / item->matrix[idx_diagonal];
+
+            for (int k = 0; k < MATRIX_DIM + 1; k++) {
+                int idx_i = i * (MATRIX_DIM + 1) + k;
+                int idx_j = j * (MATRIX_DIM + 1) + k;
+
+                item->matrix[idx_i] -= item->matrix[idx_j] * f;
+            }
+        }
+    }
+
+    return item;
 }
 
 
@@ -188,8 +212,8 @@ void *stage_2_worker(void *attr) {
 //        pthread_testcancel();
 //        printf("S2W(%ld): tests cancel\n", id);
 //        int rNum = rand() / RAND_DIVISOR;
-        //printf("S2W(%ld): sleeps for %d\n", rNum);
-        //sleep(rNum);
+
+            //sleep(rNum);
 //        if (is_end) {
 //            break;
 //        }
@@ -263,25 +287,49 @@ void *stage_2_worker(void *attr) {
 }
 
 BUFFER_ITEM * solve3(BUFFER_ITEM * item) {
-    // TODO implement
-    return item; // TODO change the return type
+    int is_one_solution = 1; // TODO overit spravnost
+
+    for (int i = 0; i < MATRIX_DIM; i++) {
+        int idx = i * (MATRIX_DIM + 1) + i;
+
+        if (fabs(item->matrix[idx]) < 0.0001) {
+            is_one_solution = 0;
+        }
+    }
+
+    if (is_one_solution) {
+        for (int i = MATRIX_DIM - 1; i >= 0; i--) {
+            double sum = 0;
+            for (int k = i + 1; k < MATRIX_DIM; k++) {
+                int idx = i * (MATRIX_DIM+1) + k;
+
+                sum += item->solution[k] * item->matrix[idx];
+            }
+
+            int idx = (i+1) * (MATRIX_DIM+1) -1 ;
+
+            item->solution[i] = (item->matrix[idx] - sum) / item->matrix[i * (MATRIX_DIM+1) + i];
+        }
+
+//        for (int i = 0; i < MATRIX_DIM; i++) {
+//            printf("x_%d = %lf\n", i, item->solution[i]);
+//        }
+    } else {
+        // zero or more than one
+        item->solutions_count = 10;
+    }
+
+    return item;
 }
 
 void *stage_3 (void *attr) {
-    THREADS_ARRAY * thread_array = (THREADS_ARRAY *) attr;
-
     int receive_data = 1;
 
-    BUFFER_ITEM * to_send = NULL; // TODO change data structure
+    BUFFER_ITEM * to_send = NULL;
 
     int transfered_matrices = 0;
 
-    while (1) {
-
-//        if (is_end && receive_data) {
-//            break;
-//        }
-
+    while (is_end != 3) {
         if (receive_data) {
             //consumer
             printf("S3: in consumer lock\n");
@@ -319,11 +367,6 @@ void *stage_3 (void *attr) {
 
             printf("S3: put %p with data %d to S4\n", to_send, to_send->id);
             transfered_matrices++;
-//            if (is_end && transfered_matrices == MATRIX_COUNT) {
-//                is_stage3_end = 1;
-//
-//                break;
-//            }
 
             receive_data = 1;
             to_send = NULL;
@@ -339,33 +382,43 @@ void *stage_3 (void *attr) {
 void *stage_4(void *attr) {
     THREADS_ARRAY * thread_array = (THREADS_ARRAY *) attr;
     int thread_cnt = 0;
+
     while (1) {
-
-
-        printf("S4: tests cancel\n");
-        sleep(1);
-
         if (is_end == 3) {
             break;
         }
 
         pthread_mutex_lock(&mutex34);
 
-
-
         while (transfer_3_to_4_stage == NULL) {
             printf("S4: cond_wait\n");
-            if (is_end == 3) {
-                printf("S4: exitting\n");
-                pthread_exit(NULL);
-            }
+//            if (is_end > 0) {
+//                printf("S4: exitting\n");
+//                pthread_exit(NULL);
+//            }
             pthread_cond_wait(&empty34, &mutex34);
         }
 
         BUFFER_ITEM * tmp = transfer_3_to_4_stage;
 
-        // TODO write to a file
+
         printf("S4: Writing %p to a file with data %d \n", tmp, tmp->id);
+
+        char filename_buffer[100];
+
+        sprintf(filename_buffer, "mat_%d.txt", tmp->id);
+
+        FILE * f = fopen(filename_buffer, "wb");
+
+        for (int y = 0; y < MATRIX_DIM; y++) {
+            for (int x = 0; x < MATRIX_DIM +1; x++) {
+                int idx = y * (MATRIX_DIM + 1) + x;
+                fprintf(f, "%lf ", tmp->matrix[idx]);
+            }
+            fprintf(f,"\n");
+        }
+
+        fclose(f);
 
         free(tmp);
 
@@ -373,18 +426,20 @@ void *stage_4(void *attr) {
 
         transfer_3_to_4_stage = NULL;
 
+        pthread_mutex_unlock(&mutex34);
         pthread_cond_signal(&full34);
 
-        pthread_mutex_unlock(&mutex34);
 
         thread_cnt++;
 
-        if (is_end && thread_cnt == MATRIX_COUNT) {
+        if (is_end > 0 && thread_cnt == MATRIX_COUNT) {
             break;
         }
     }
 
     printf("S4: exitting\n");
+
+
 
     for (int i = 1; i < STAGE2_WORKERS_COUNT + 1; i++) {
 
@@ -393,6 +448,8 @@ void *stage_4(void *attr) {
 
         printf("S4: Cancelling %d \n", i);
     }
+
+    is_end = 3;
 
     pthread_exit(NULL);
 }
