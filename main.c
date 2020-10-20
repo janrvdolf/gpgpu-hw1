@@ -106,6 +106,19 @@ void *stage_1(void *attr) {
 
     is_end = 1;
 
+    while(is_end != 3) {
+
+    }
+
+    for (int i = 0; i < STAGE2_WORKERS_COUNT + 3; i++) {
+
+        pthread_cancel(thread_array->entry[i]);
+//        pthread_kill(thread_array->entry[i], SIGKILL);
+
+        printf("S4: Cancelling %d \n", i);
+    }
+
+
     printf("S1: exitting\n");
 
     pthread_exit(NULL);
@@ -196,13 +209,17 @@ BUFFER_ITEM * solve2(BUFFER_ITEM * item) {
     return item;
 }
 
+void cleanup_handler(void *plock) {
+    pthread_mutex_unlock(plock);
+}
 
 
 void *stage_2_worker(void *attr) {
-
     int gets_from_buffer = 1;
 
     long int id = (long int) attr;
+
+    pthread_cleanup_push(cleanup_handler, &mutex2);
 
     printf("Starting thread S2W(%ld)\n", id);
 
@@ -211,7 +228,7 @@ void *stage_2_worker(void *attr) {
     while (1) {
 //        pthread_testcancel();
 //        printf("S2W(%ld): tests cancel\n", id);
-//        int rNum = rand() / RAND_DIVISOR;
+       //int rNum = rand() / RAND_DIVISOR;
 
             //sleep(rNum);
 //        if (is_end) {
@@ -280,6 +297,8 @@ void *stage_2_worker(void *attr) {
             printf("S2W(%ld): out producer mutex\n", id);
         }
     }
+
+    pthread_cleanup_pop(0);
 
     printf("S2W(%ld): exitting\n", id);
 
@@ -436,16 +455,6 @@ void *stage_4(void *attr) {
     }
 
     printf("S4: exitting\n");
-
-
-
-    for (int i = 1; i < STAGE2_WORKERS_COUNT + 3; i++) {
-
-        pthread_cancel(thread_array->entry[i]);
-//        pthread_kill(thread_array->entry[i], SIGKILL);
-
-        printf("S4: Cancelling %d \n", i);
-    }
 
     is_end = 3;
 
