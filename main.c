@@ -400,22 +400,14 @@ void *stage_3 (void *attr) {
 }
 
 void *stage_4(void *attr) {
-    THREADS_ARRAY * thread_array = (THREADS_ARRAY *) attr;
     int thread_cnt = 0;
 
     while (1) {
-        if (is_end == 3) {
-            break;
-        }
-
         pthread_mutex_lock(&mutex34);
 
         while (transfer_3_to_4_stage == NULL) {
             printf("S4: cond_wait\n");
-//            if (is_end > 0) {
-//                printf("S4: exitting\n");
-//                pthread_exit(NULL);
-//            }
+
             pthread_cond_wait(&empty34, &mutex34);
         }
 
